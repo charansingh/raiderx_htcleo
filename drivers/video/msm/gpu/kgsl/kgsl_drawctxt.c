@@ -177,6 +177,7 @@ unsigned int uint2float(unsigned int uintval)
 
 	/* Calculate fraction */
 	frac = (uintval & (~(1 << exp))) << (23 - exp);
+	if (23 >= exp)
 
 	/* Exp is biased by 127 and shifted 23 bits */
 	exp = (exp + 127) << 23;
