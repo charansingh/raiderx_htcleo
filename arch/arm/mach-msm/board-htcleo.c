@@ -51,7 +51,9 @@
 #include <mach/perflock.h>
 #include <mach/htc_usb.h>
 #include <mach/msm_flashlight.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_serial_hs.h>
+#include <mach/msm_serial_debugger.h>
 #include <mach/perflock.h>
 #include <mach/htc_headset_mgr.h>
 #include <mach/htc_headset_gpio.h>
@@ -114,7 +116,7 @@ static struct regulator_init_data tps65023_data[5] =
         .constraints =
 		{
             .name = "dcdc1", /* VREG_MSMC2_1V29 */
-            .min_uV = 1000000,
+            .min_uV = 975000,
             .max_uV = 1300000,
             .valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
         },
@@ -507,7 +509,66 @@ static struct platform_device msm_camera_sensor_s5k3e2fx =
 ///////////////////////////////////////////////////////////////////////
 // bluetooth
 ///////////////////////////////////////////////////////////////////////
-#define ATAG_BDADDR 0x43294329  /* mahimahi bluetooth address tag */
+
+static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
+	.rx_wakeup_irq = -1,
+	.inject_rx_on_wakeup = 0,
+	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
+};
+
+static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = HTCLEO_GPIO_BT_WAKE,
+	.gpio_host_wake = HTCLEO_GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+	},
+};
+
+static uint32_t bt_gpio_table[] = {
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_RTS, 2, GPIO_OUTPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_CTS, 2, GPIO_INPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_RX, 2, GPIO_INPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_TX, 2, GPIO_OUTPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_RESET_N, 0, GPIO_OUTPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_SHUTDOWN_N, 0, GPIO_OUTPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_WAKE, 0, GPIO_OUTPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_HOST_WAKE, 0, GPIO_INPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+};
+
+static uint32_t bt_gpio_table_rev_CX[] = {
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_RTS, 2, GPIO_OUTPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_CTS, 2, GPIO_INPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_RX, 2, GPIO_INPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_UART1_TX, 2, GPIO_OUTPUT,
+		      GPIO_PULL_UP, GPIO_8MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_RESET_N, 0, GPIO_OUTPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_SHUTDOWN_N, 0, GPIO_OUTPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+	PCOM_GPIO_CFG(HTCLEO_GPIO_BT_HOST_WAKE, 0, GPIO_INPUT,
+		      GPIO_PULL_DOWN, GPIO_4MA),
+};
+
+
+#define ATAG_BDADDR 0x43294329  /* htcleo bluetooth address tag */
 #define ATAG_BDADDR_SIZE 4
 #define BDADDR_STR_SIZE 18
 
@@ -531,22 +592,14 @@ static int __init parse_tag_bdaddr(const struct tag *tag)
 
 __tagtable(ATAG_BDADDR, parse_tag_bdaddr);
 
-#ifdef CONFIG_SERIAL_MSM_HS
-static struct msm_serial_hs_platform_data msm_uart_dm1_pdata =
-{
-	/* for bcm */
-	.bt_wakeup_pin_supported = 1,
-	.bt_wakeup_pin   = HTCLEO_GPIO_BT_CHIP_WAKE,
-	.host_wakeup_pin = HTCLEO_GPIO_BT_HOST_WAKE,
-
-};
-#endif
 
 static struct platform_device htcleo_rfkill =
 {
 	.name = "htcleo_rfkill",
 	.id = -1,
 };
+
+
 
 ///////////////////////////////////////////////////////////////////////
 // SPI
@@ -819,9 +872,8 @@ static struct platform_device *devices[] __initdata =
 #if !defined(CONFIG_MSM_SERIAL_DEBUGGER)
 	&msm_device_uart1,
 #endif
-#ifdef CONFIG_SERIAL_MSM_HS
+	&bcm_bt_lpm_device,
 	&msm_device_uart_dm1,
-#endif
 	&msm_device_nand,
 	&msm_device_smd,
 	&htcleo_rfkill,
@@ -954,11 +1006,11 @@ static void __init htcleo_init(void)
 
 	init_dex_comm();
 
-#ifdef CONFIG_SERIAL_MSM_HS
-  	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
-	msm_device_uart_dm1.name = "msm_serial_hs_bcm"; /* for bcm */
-    	msm_device_uart_dm1.resource[3].end = 6;
-#endif
+	msm_serial_debug_init(MSM_UART1_PHYS, INT_UART1,
+			      &msm_device_uart1.dev, 1, MSM_GPIO_TO_INT(139));
+
+
+		config_gpio_table(bt_gpio_table, ARRAY_SIZE(bt_gpio_table));
 
 	htcleo_audio_init();
 
@@ -971,6 +1023,8 @@ static void __init htcleo_init(void)
 	htcleo_kgsl_power(false);
 	mdelay(100);
 	htcleo_kgsl_power(true);
+
+	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 
